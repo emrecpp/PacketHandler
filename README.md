@@ -1,2 +1,3 @@
-# Packet
-With Socket, Send, Recv and Parse data
+# Packet Handler for Python
+With Socket, Send, Recv and Parse data.
+
