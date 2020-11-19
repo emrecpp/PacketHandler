@@ -37,7 +37,7 @@ print("opcode: %d" % paket.GetOpcode()) # 0x1 (Opcodes.LOGIN)
 print("myUsername: %s" % (myUsername))
 print("myPassword: %s" % (myPassword))
 print("rememberMe: %s" % (rememberMe))
-
+print("Packet Size: %d" % (packetSize))
 ```
 
 # Output:
@@ -45,6 +45,7 @@ print("rememberMe: %s" % (rememberMe))
 myUsername: EmreDemircan
 myPassword: 123456
 rememberMe: 1
+Packet Size: 35
 ```
 
 
