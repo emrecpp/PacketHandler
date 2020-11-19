@@ -94,7 +94,7 @@ class Packet(object):
         def __init__(self, obj): self.obj = obj
         def __get__(self, instance, owner): return self.obj
         def __set__(self, instance, value): self.obj = value
-        def __eq__(self, other): self.obj = value
+        def __eq__(self, other): return other == self.obj
         def __setattr__(self, key, value): self.__dict__[key]=value
         def __getattr__(self, item): return self.obj
         def __str__(self): # print("Data: %s" % (data_str))
