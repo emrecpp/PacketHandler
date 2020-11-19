@@ -1,4 +1,4 @@
-# Packet Handler for Python
+# Python Packet Handler
 With Socket, Send, Recv and Parse data.
 
 # Example Usage
