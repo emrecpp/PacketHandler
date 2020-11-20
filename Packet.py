@@ -1,12 +1,13 @@
+# -*- coding: utf-8 -*-
 """ With Socket, Send, Recv and Parse data
 """
 
 version     = "1.0.0"
 __author__  = "Emre Demircan (emrecpp1@gmail.com)"
-__date__    = "2020-11-19 11:03:53"
+__date__    = "2020-11-20 12:10:00"
 
-import sys, os
-#import socket
+import sys, os, time
+import socket
 import ctypes
 from functools import singledispatch
 import struct
@@ -30,17 +31,28 @@ class Packet(object):
 
     def append(self, buffer):
         return TypeError("append Unknown Data Type")
+    def clear(self):
+        if len(self.storage) > 0 and self.storage[0] != 0:
+            #fmt = '%ds %dx %ds' % (0, 1, len(self.storage)-1)
+            #self.storage = bytearray(struct.unpack(fmt, self.storage)[1])
+            self.storage =bytearray(self.storage[0:1])
+            self._rpos = 1
+            self._wpos = 1
+        else:
+            self.storage.clear()
+            self._rpos = 0
+            self._wpos = 0
 
     def append_int(self, buffer):
         bf = struct.pack("<I", buffer)
-        self.storage.extend(struct.pack("<I", len(bf)))
+        self.storage.extend(struct.pack("<I", socket.htonl(len(bf))))
         self.storage.extend(bf)
         self._wpos+=len(bf)
 
 
     def append_str(self, buffer):
         bf = struct.pack("%ds" %(len(buffer)), bytes(buffer, "utf-8"))
-        self.storage.extend(struct.pack("<I", len(buffer)))
+        self.storage.extend(struct.pack("<I", socket.htonl(len(buffer))))
         self.storage.extend(bf)
         self._wpos+=len(bf)
 
@@ -58,6 +70,8 @@ class Packet(object):
         return self
 
     def __rshift__(self, value):
+        if self.size() > 0 and self._rpos==0: # Skip Opcode
+            self._rpos=1
         if value.obj == int:
             Sonuc = self.read_int()
         elif value.obj==str:
@@ -74,7 +88,9 @@ class Packet(object):
     def read_int(self):
         if self._rpos + 4 >= self.size():
             return 0
-        ReadLength = struct.unpack("<I", self.storage[self._rpos:self._rpos+4])[0]
+        ReadLength = socket.ntohl(struct.unpack("<I", self.storage[self._rpos:self._rpos+4])[0])
+        if self._rpos+ReadLength >= self.size():
+            return 0
         self._rpos += ReadLength
         data = struct.unpack("<I", self.storage[self._rpos:self._rpos+ReadLength])[0]
         self._rpos += ReadLength
@@ -83,7 +99,7 @@ class Packet(object):
     def read_str(self):
         if self._rpos + 4 >= self.size():
             return ""
-        ReadLength = struct.unpack("<I", self.storage[self._rpos:self._rpos+4])[0]
+        ReadLength = socket.ntohl(struct.unpack("<I", self.storage[self._rpos:self._rpos+4])[0])
         self._rpos += 4
         data= self.storage[self._rpos:self._rpos+ReadLength].decode('utf-8')
         self._rpos += ReadLength
@@ -102,3 +118,45 @@ class Packet(object):
         def __int__(self): # print("Data: %d" % (data_int))
             return self.obj
 
+
+    def Send(self, s):
+        try:
+            #encodedPacketSize = socket.htons(self.size())
+            if self.size() == 0:
+                return False
+            msg = struct.pack(">I", socket.ntohl(self.size()))
+            s.send(msg)
+            numberOfBytes = len(self.storage)
+            totalBytesSent = 0
+            while totalBytesSent < numberOfBytes:
+                totalBytesSent += s.send(self.storage[totalBytesSent:])
+            return True
+        except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
+            return False
+        except Exception as ERR:
+            exc_type, exc_obj, exc_tb = sys.exc_info(); fname = exc_tb.tb_frame.f_code.co_filename
+            print("Packet Send Err: %s    " % str(ERR), exc_type, fname, exc_tb.tb_lineno)
+
+            return False
+
+
+    def Recv(self, s):
+        try:
+            packetSize = s.recv(4)
+            if not packetSize: # Connection Closed
+                return False
+
+            packetSize = socket.htonl(struct.unpack(">I", packetSize)[0])
+            self.storage.clear()
+            self.storage.extend(s.recv(packetSize))
+            self._wpos = len(self.storage)
+
+
+            return True
+        except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
+            return False
+        except Exception as ERR:
+            exc_type, exc_obj, exc_tb = sys.exc_info();
+            fname = exc_tb.tb_frame.f_code.co_filename
+            print("Packet Recv Err: %s    " % str(ERR), exc_type, fname, exc_tb.tb_lineno)
+            return False
