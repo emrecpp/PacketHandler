@@ -2,9 +2,9 @@
 """ With Socket, Send, Recv and Parse data
 """
 
-version     = "1.0.0"
+version     = "1.0.1"
 __author__  = "Emre Demircan (emrecpp1@gmail.com)"
-__date__    = "2020-11-19 11:03:53"
+__date__    = "2020-11-24 14:12:00"
 
 import sys, os, time
 import socket
@@ -99,10 +99,7 @@ class Packet(object):
         else:
             return self
 
-
         value.obj = Sonuc
-
-
         return self
 
 
@@ -168,7 +165,6 @@ class Packet(object):
         except Exception as ERR:
             exc_type, exc_obj, exc_tb = sys.exc_info(); fname = exc_tb.tb_frame.f_code.co_filename
             print("Packet Send Err: %s    " % str(ERR), exc_type, fname, exc_tb.tb_lineno)
-
             return False
 
 
@@ -194,5 +190,3 @@ class Packet(object):
             fname = exc_tb.tb_frame.f_code.co_filename
             print("Packet Recv Err: %s    " % str(ERR), exc_type, fname, exc_tb.tb_lineno)
             return False
-
-        
