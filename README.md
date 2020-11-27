@@ -37,8 +37,8 @@ paket.Send(Sock)
 ClientPacket = Packet()
 ClientPacket.Recv(Sock)
 myUsername, myPassword, rememberMe, bytearr = Packet.ref(str), Packet.ref(str), Packet.ref(int), Packet.ref(bytearray)
-paket >> myUsername >> myPassword >> rememberMe >> bytearr
-print("Opcode: %d" % paket.GetOpcode()) # 0x1 (Opcodes.LOGIN)
+ClientPacket >> myUsername >> myPassword >> rememberMe >> bytearr
+print("Opcode: %d" % ClientPacket.GetOpcode()) # 0x1 (Opcodes.LOGIN)
 print("myUsername: %s" % (myUsername))
 print("myPassword: %s" % (myPassword))
 print("rememberMe: %s" % (rememberMe))
