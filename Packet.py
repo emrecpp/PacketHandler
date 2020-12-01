@@ -2,13 +2,12 @@
 """ With Socket, Send, Recv and Parse data
 """
 
-version = "1.0.2"
+version = "1.0.3"
 __author__ = "Emre Demircan (emrecpp1@gmail.com)"
-__date__ = "2020-11-27 22:47:00"
+__date__ = "2020-12-1"
 
 import sys, os, time
 import socket
-import ctypes
 from functools import singledispatch
 import struct
 
@@ -31,10 +30,10 @@ class Packet(object):
         self.storage = bytearray()
         self.storage.clear()
         self.storage.append(opcode)
-
+        self._rpos = 1 # Skip Opcode
         if opcode != 0:
             self._wpos = 1
-            self._rpos = 1
+
         self.useNtohl = useNtohl
 
     def append(self, buffer):
@@ -65,7 +64,8 @@ class Packet(object):
         self._wpos += len(bf)
 
     def append_str(self, buffer):
-        bf = struct.pack("%ds" % (len(buffer)), bytes(buffer, "utf-8"))
+        bytesBuffer = bytes(buffer, "utf-8")
+        bf = struct.pack("%ds" % (len(bytesBuffer)), bytesBuffer)
         if self.useNtohl:
             self.storage.extend(struct.pack("<I", socket.htonl(len(bf))))
         else:
@@ -86,7 +86,7 @@ class Packet(object):
     def size(self):
         return len(self.storage)
 
-    def GetOpcode(self):
+    def GetOpcode(self): # Opcome mush be 0-255 because reserve 1 byte (max=\xFF=255)
         return 0 if len(self.storage) == 0 else self.storage[0]
 
     def __lshift__(self, value):
@@ -108,7 +108,7 @@ class Packet(object):
         value.obj = Sonuc
         return self
 
-    def readLength(self): # Reserved Data Size in 4 bytes
+    def readLength(self): # Reserved Data Size, in 4 bytes
         if self._rpos +4 > self.size():
             return None
         ReadLength = struct.unpack("<I", self.storage[self._rpos:self._rpos + 4])[0]
@@ -154,7 +154,7 @@ class Packet(object):
         self._rpos += ReadLength
         return data
 
-    class ref(object):  # We don't have Pointers in Python :(
+    class ref():  # We don't have Pointers in Python :(
         obj = None
 
         def __init__(self, obj): self.obj = obj
@@ -180,6 +180,9 @@ class Packet(object):
         try:
             if self.size() == 0:
                 return False
+            if hasattr(s, "_closed") and s._closed:
+                print("Packet Handler | Connection is already closed!")
+                return False
             if self.useNtohl:
                 msg = struct.pack(">I", socket.ntohl(self.size()))
             else:
@@ -188,19 +191,18 @@ class Packet(object):
 
             if waitRecv:
                 SocketCreatedNew = False
-                if type(waitRecv) == socket: # if Socket created we will not close it and we can use it multiple times.
+                if type(waitRecv) == socket.socket: # if Socket created we will not close it and we can use it multiple times.
                     TargetSocket = waitRecv
                 else:
                     SocketCreatedNew = True
                     newSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     newSocket.connect(s.getpeername())  # Be sure; Server can listen more than 1 socket.
-
-
-                TargetSocket = newSocket
+                    TargetSocket = newSocket
 
             TargetSocket.send(msg)
             numberOfBytes = self.size()
             totalBytesSent = 0
+
             while totalBytesSent < numberOfBytes:
                 totalBytesSent += TargetSocket.send(self.storage[totalBytesSent:])
 
@@ -216,7 +218,7 @@ class Packet(object):
         except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
             return False
         except OSError:
-            print("Sent Failed probably Connection Closed.")
+            print("Packet Handler | Send Failed probably Connection Closed.")
             return False
         except Exception as ERR:
             exc_type, exc_obj, exc_tb = sys.exc_info();
@@ -234,7 +236,15 @@ class Packet(object):
             if self.useNtohl:
                 packetSize = socket.ntohl(packetSize)
             self.storage.clear()
-            self.storage.extend(s.recv(packetSize))
+            totalBytesReceived = 0
+
+            while totalBytesReceived < packetSize:
+                ReceivedBytes = s.recv(packetSize-totalBytesReceived)
+                self.storage.extend(ReceivedBytes)
+                totalBytesReceived+=len(ReceivedBytes)
+
+
+
             self._wpos = self.size()
             if self._rpos == 0 and self.size() > 0:
                 self._rpos = 1 # Skip Opcode
