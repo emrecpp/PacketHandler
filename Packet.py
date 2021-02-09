@@ -1,31 +1,44 @@
 # -*- coding: utf-8 -*-
-""" With Socket, Send, Recv and Parse data
+""" Store data as packet. Send, Recv, Encrypt it. 
 """
 
-version = "1.0.4"
+version = "1.0.5"
 __author__ = "Emre Demircan (emrecpp1@gmail.com)"
-__date__ = "2020-12-13"
+__date__ = "2021-02-09"
+__github__ = "emrecpp"
 
 import sys, os, time
 import socket
 from functools import singledispatch
 import struct
-
+from datetime import datetime
 
 class Packet(object):
     storage = bytearray()
-    _rpos, _wpos, encryptEnabled = 0, 0, False
-    useNtohl = True
-    PrintErrorLog=True
+
+    # First 2 bytes : Opcodes [0-255*256]
+    INDEX_OF_FLAG = 2  # Flag
+    INDEX_OF_COUNT_ELEMENTS = 3 # 4. byte: Count of Total Data types
+    # Todo: 5. byte: empty
+    # Todo: 6. byte: empty
+
+    _rpos, _wpos, encryptEnabled = 6, 6, False
+    PrintErrorLog=False
+
+    Last_SendTime = "" # if packet will send, will stored this
+    Last_RecvTime = ""
+    class Flags:
+        Encrypted=1
+        isLittleEndian=2
 
     # Maximum a Variable data Size = "\xFF\xFF\xFF\xFF" (4.294.967.295 bytes (4GB))
-    # Opcode Range: [0-255]
-
-    def __init__(self, opcode=0, useNtohl=True, encryptEnabled=False, PrintErrorLog=True):
+    # Opcode Range: [0-255*256]
+    m_littleEndian=False
+    def __init__(self, opcode=0, littleEndian=False, encryptBeforeSend=False, PrintErrorLog=False):
         super(Packet, self).__init__()
-        self._rpos = 0
-        self._wpos = 0
-        self.encryptEnabled=encryptEnabled
+        self._rpos = 6
+        self._wpos = 6
+        self.encryptBeforeSend=encryptBeforeSend
         self.PrintErrorLog = PrintErrorLog
         self.overload_append = singledispatch(self.append)
         self.overload_append.register(int, self.append_int)
@@ -33,93 +46,95 @@ class Packet(object):
         self.overload_append.register(bytearray, self.append_bytearray)
         self.storage = bytearray()
         self.storage.clear()
-        self.storage.append(opcode)
-        self._rpos = 1 # Skip Opcode
-        if opcode != 0:
-            self._wpos = 1
+        self.storage.extend(struct.pack(">H", opcode))
+        #self.storage.extend(struct.pack("<H", opcode) if littleEndian else struct.pack(">H", opcode))
+        self.storage.extend(b'\0\0\0\0')
+        self.littleEndian=littleEndian
 
-        self.useNtohl = useNtohl
+    @property
+    def littleEndian(self):
+        return self.m_littleEndian
+
+    @littleEndian.setter
+    def littleEndian(self, value):
+        self.m_littleEndian=value
+        if value:
+            self.storage[self.INDEX_OF_FLAG] |= self.Flags.isLittleEndian
+        else:
+            self.storage[self.INDEX_OF_FLAG] &= ~self.Flags.isLittleEndian
 
     def append(self, buffer):
         return TypeError("append Unknown Data Type")
 
-    def clear(self):
-        if len(self.storage) > 0 and self.storage[0] != 0:
+    def clear(self) -> None:
+        if self.size() > 0 and struct.unpack("<H" if self.littleEndian else ">H", self.storage[0:2])[0] != 0:
             # fmt = '%ds %dx %ds' % (0, 1, len(self.storage)-1)
             # self.storage = bytearray(struct.unpack(fmt, self.storage)[1])
-            self.storage = bytearray(self.storage[0:1])
-            self._rpos = 1
-            self._wpos = 1
+            self.storage = bytearray(self.storage[0:2])
+            self.storage.extend(b'\0\0\0\0')
         else:
             self.storage.clear()
-            self._rpos = 0
-            self._wpos = 0
-    #00000000: 07 01 00 00 00 00 00 00 0D 45 6D 72 65 20 44 65   .........Emre.De
-    #00000010: 6D 69 72 63 61 6E                                  mircan
-    # To ->
-    #00000000: E3 D9 D4 D0 CC C8 C4 C0 C9 FD 21 22 11 C8 E8 05   ã.Ù.Ô.Ð.Ì.È.Ä.À.É.ý.!."...È.è..
-    #00000010: 09 01 06 F3 ED F6                                  ......ó.í.ö
-    def Encrypt(self):
-        for i in range(self.size()):
+            self.storage.extend(b'\0\0\0\0\0\0')
+        self._rpos = 6
+        self._wpos = 6
+
+    def Encrypt(self) -> None:
+        for i in range(2+4,self.size()): # Skip opcode and reserved 4 bytes
             data = self.storage[i]
             encVal = 0x123 + i*4
             encVal ^= 0xFF
 
             self.storage[i] = (data + encVal) & 0xFF
-
-    def Decrypt(self):
-        for i in range(self.size()):
+        self.storage[self.INDEX_OF_FLAG] |= self.Flags.Encrypted
+    def Decrypt(self) -> None:
+        for i in range(2+4,self.size()): # Skip opcode and reserved 4 bytes
             data = self.storage[i]
             encVal = 0x123 + i*4
             encVal ^= 0xFF
 
             self.storage[i] = (data-encVal) & 0xFF
 
-    def append_int(self, buffer):
-        bf = struct.pack("<I", buffer)
-
-        # Maximum Integer Value = "\xFF\xFF\xFF\xFF" (4.294.967.295)
-        '''if self.useNtohl:
-            self.storage.extend(struct.pack("<I", socket.htonl(len(bf))))
-        else:
-            self.storage.extend(struct.pack("<I", len(bf)))'''
-
+        self.storage[self.INDEX_OF_FLAG] &= ~self.Flags.Encrypted
+    def append_int(self, buffer) -> None:
+        bf = struct.pack("<I", buffer) if self.littleEndian else struct.pack(">I", buffer)
         self.storage.extend(bf)
         self._wpos += len(bf)
 
-    def append_str(self, buffer):
+    def append_str(self, buffer) -> None:
         bytesBuffer = bytes(buffer, "utf-8")
         bf = struct.pack("%ds" % (len(bytesBuffer)), bytesBuffer)
-        if self.useNtohl:
-            self.storage.extend(struct.pack("<I", socket.htonl(len(bf))))
-        else:
-            self.storage.extend(struct.pack("<I", len(buffer)))
+
+        self.storage.extend(struct.pack("<I", len(bf)) if self.littleEndian else struct.pack(">I", len(bf)))
+
         self.storage.extend(bf)
         self._wpos += len(bf)
-    def append_bytearray(self, buffer):
-        if self.useNtohl:
-            self.storage.extend(struct.pack("<I", socket.htonl(len(buffer))))
-        else:
-            self.storage.extend(struct.pack("<I", len(buffer)))
+    def append_bytearray(self, buffer) -> None:
+
+        self.storage.extend(struct.pack("<I",len(buffer)) if self.littleEndian else struct.pack(">I", len(buffer)))
+
         self.storage.extend(buffer)
         self._wpos += len(buffer)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.size()
 
-    def size(self):
+    def size(self) -> int:
         return len(self.storage)
 
-    def GetOpcode(self): # Opcode must be 0-255 because reserve first 1 byte (max=\xFF=255)
-        return 0 if len(self.storage) == 0 else self.storage[0]
+    def GetOpcode(self) -> int:
+        return 0 if len(self.storage) < 2 else (struct.unpack("<H",self.storage[0:2])[0] if self.littleEndian else struct.unpack(">H",self.storage[0:2])[0])
 
     def __lshift__(self, value):
         self.overload_append(value)
+        COUNT_ELEMENTS = self.storage[self.INDEX_OF_COUNT_ELEMENTS]
+        if COUNT_ELEMENTS +1 < 255:
+            self.storage[self.INDEX_OF_COUNT_ELEMENTS] += 1
         return self
 
     def __rshift__(self, value):
         if self.size() > 0 and self._rpos == 0:  # Skip Opcode
-            self._rpos = 1
+            if self.GetOpcode() != 0: # if opcode is 0 that means we don't have opcode, we have only data
+                self._rpos = 6
         if value.obj == int:
             Sonuc = self.read_int()
         elif value.obj == str:
@@ -132,36 +147,18 @@ class Packet(object):
         value.obj = Sonuc
         return self
 
-    def readLength(self): # Reserved Data Size, in 4 bytes
-        if self._rpos +4 > self.size():
-            return None
-        ReadLength = struct.unpack("<I", self.storage[self._rpos:self._rpos + 4])[0]
-        if self.useNtohl:
-            ReadLength = socket.ntohl(ReadLength)
+    def readLength(self) -> int: # Reserved Data Size, in 4 bytes
+        return self.read_int()
 
-        self._rpos += 4
-        return ReadLength
-
-    def read_int(self):  # Maximum Integer Value = \xFF\xFF\xFF\xFF = (4.294.967.295)
+    def read_int(self) -> int:  # Maximum Integer Value = \xFF\xFF\xFF\xFF = (4.294.967.295)
         if self._rpos + 4 > self.size():
             return 0
 
-        '''ReadLength = struct.unpack("<I", self.storage[self._rpos:self._rpos+4])[0]
-        if self.useNtohl:
-            ReadLength = socket.ntohl(ReadLength)
-
-        if self._rpos+ReadLength >= self.size():
-            return 0
-
-        self._rpos += ReadLength
-        data = struct.unpack("<I", self.storage[self._rpos:self._rpos+ReadLength])[0]
-        self._rpos += ReadLength
-        '''
-        data = struct.unpack("<I", self.storage[self._rpos:self._rpos + 4])[0]
+        data = struct.unpack("<I", self.storage[self._rpos:self._rpos + 4])[0] if self.littleEndian else struct.unpack(">I", self.storage[self._rpos:self._rpos + 4])[0]
         self._rpos += 4
         return data
 
-    def read_str(self):
+    def read_str(self) -> str:
         ReadLength = self.readLength()
         if ReadLength == None:
             return ""
@@ -170,7 +167,7 @@ class Packet(object):
         self._rpos += ReadLength
         return data
 
-    def read_bytearray(self):
+    def read_bytearray(self) -> bytearray:
         ReadLength = self.readLength()
         if ReadLength == None:
             return bytearray()
@@ -192,17 +189,21 @@ class Packet(object):
             return self.obj
 
     # waitRecv = if you have a Recv function in thread, then you sent packet will received from this thread received function. So creating new socket, sending and receiving data from new socket. So Thread Recv function can't access this data.
-    def Send(self, s, waitRecv=False):
+
+    def Send(self, s, waitRecv=False) -> bool:
+        """
+        :param s: Send socket
+        :param waitRecv: bool, will it wait Recv after Send
+        """
         try:
             if self.size() == 0:
                 return False
             if hasattr(s, "_closed") and s._closed:
                 if self.PrintErrorLog: print("Packet Handler | Connection is already closed!")
                 return False
-            if self.useNtohl:
-                msg = struct.pack(">I", socket.ntohl(self.size()))
-            else:
-                msg = struct.pack(">I", self.size())
+
+            msg = struct.pack("<I", self.size()) if self.littleEndian else struct.pack(">I", self.size())
+
             TargetSocket = s
 
             if waitRecv:
@@ -222,11 +223,11 @@ class Packet(object):
             TargetSocket.send(msg)
             numberOfBytes = self.size()
             totalBytesSent = 0
-            if self.encryptEnabled: self.Encrypt()
+            if self.encryptBeforeSend and (self.storage[self.INDEX_OF_FLAG] & self.Flags.Encrypted) ==0: self.Encrypt()
 
             while totalBytesSent < numberOfBytes:
                 totalBytesSent += TargetSocket.send(self.storage[totalBytesSent:])
-
+            self.Last_SendTime = datetime.now()
             if waitRecv:
                 self.Recv(TargetSocket)
                 if SocketCreatedNew:
@@ -245,15 +246,19 @@ class Packet(object):
             if self.PrintErrorLog: self.PrintErr("Packet Send Err: %s    " % str(ERR))
             return False
 
-    def Recv(self, s):
+    def Recv(self, s, clear=True) -> bool:
+        """
+        :param s: Socket to wait Recv
+        :param clear: Clear Packet before Receiving data
+        """
         try:
+            if clear:
+                self.clear()
             packetSize = s.recv(4)
             if not packetSize:  # Connection Closed
                 return False
 
-            packetSize = struct.unpack(">I", packetSize)[0]
-            if self.useNtohl:
-                packetSize = socket.ntohl(packetSize)
+            packetSize = struct.unpack("<I", packetSize)[0] if self.littleEndian else struct.unpack(">I", packetSize)[0]
             self.storage.clear()
             totalBytesReceived = 0
 
@@ -266,42 +271,33 @@ class Packet(object):
                     return False
                 self.storage.extend(ReceivedBytes)
                 totalBytesReceived+=len(ReceivedBytes)
-
-            if self.encryptEnabled: self.Decrypt()
+            
+            self.Last_RecvTime = datetime.now()
+            if (self.storage[self.INDEX_OF_FLAG] & self.Flags.Encrypted) == 1: self.Decrypt()
 
 
             self._wpos = self.size()
             if self._rpos == 0 and self.size() > 0:
-                self._rpos = 1 # Skip Opcode
+                self._rpos = 6 # Skip Opcode
             return True
         except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
             return False
         except Exception as ERR:
             if self.PrintErrorLog: self.PrintErr("Packet Recv Err: %s    " % str(ERR))
             return False
-    def PrintErr(self, ERR):
+    def PrintErr(self, ERR) -> None:
         exc_type, exc_obj, exc_tb = sys.exc_info();
         fname = exc_tb.tb_frame.f_code.co_filename
         print(ERR, exc_type, fname, exc_tb.tb_lineno)
 
 
-    # >>> Output : Print
-    # Flag (Default) = 1 | 2 | 4
-    # 00000000: 07 01 00 00 00 00 00 00 0D 45 6D 72 65 20 44 65   .........Emre.De
-    # 00000010: 6D 69 72 63 61 6E                                  mircan
-
-    # Flag = 1
-    # 00000000:
-    # 00000010:
-
-    #Flag = 2
-    # 07 01 00 00 00 00 00 00 0D 45 6D 72 65 20 44 65
-    # 6D 69 72 63 61 6E
-
-    # Flag = 4
-    # .........Emre.De
-    # mircan
-    def Print(self, maxPerLine=16, utf_8=True, Flag=1|2|4): # 1 Address, 2 Hex Bytes, 4 ASCII
+    def Print(self, maxPerLine=16, utf_8=True, Flag=1|2|4) -> str: # 1 Address, 2 Hex Bytes, 4 ASCII
+        """
+        :param maxPerLine: How many bytes will show on per line
+        :param utf_8: Decode ASCII to Utf-8
+        :param Flag: 1 Address, 2 Hex Bytes, 4 ASCII
+        :return: printing and returning print string
+        """
         try:
             Total = ""
             dumpstr=""
@@ -326,8 +322,8 @@ class Packet(object):
                 line += ' ' * pad
 
                 if (Flag & 4) == 4:
+                    line += " "
                     if utf_8:
-                        line+=" "
                         try:
                             utf8str = str(bytes(self.storage[addr:addr+maxPerLine]), 'utf-8')
                         except UnicodeDecodeError:
@@ -340,7 +336,6 @@ class Packet(object):
                             i+=1
                         line+= "".join(listutf8str)
                     else:
-                        line += " "
                         for byte in d:
                             if byte > 0x20 and byte <= 0x7E:
                                 line += chr(byte)
