@@ -64,7 +64,6 @@ Opcode: 1
 myUsername: EmreDemircan
 myPassword: 123456
 rememberMe: 1
-Packet Size: 50
 
 
 Little Endian
