@@ -54,8 +54,6 @@ paket.Print(maxPerLine=16, Flag=1|2|4) # Flag : [1 Addresses, 2 Hex bytes, 4 ASC
 
 paket.Encrypt()
 paket.Print()
-
-
 ```
 
 # Output:
@@ -67,6 +65,8 @@ rememberMe: 1
 
 
 Little Endian
+
+
 Normal / Decrypted Print:
 00000000: 00 01 02 04 00 00 0C 00 00 00 45 6D 72 65 44 65   ..........EmreDe
 00000010: 6D 69 72 63 61 6E 06 00 00 00 31 32 33 34 35 36   mircan....123456
