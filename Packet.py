@@ -185,21 +185,10 @@ class Packet(object):
         self._rpos += ReadLength
         return data
     def read_list(self) -> list:
-        STR = Packet.ref(str)
+        STR = ref(str)
         self >> STR
         return json.loads(str(STR))
-    class ref():  # We don't have Pointers in Python :(
-        obj = None
-        def __init__(self, obj): self.obj = obj
-        def __get__(self, instance, owner): return self.obj
-        def __set__(self, instance, value): self.obj = value
-        def __eq__(self, other): return other == self.obj
-        def __setattr__(self, key, value): self.__dict__[key] = value
-        def __getattr__(self, item): return self.obj
-        def __str__(self):  # print("Data: %s" % (data_str))
-            return str(self.obj)
-        def __int__(self):  # print("Data: %d" % (data_int))
-            return self.obj
+
 
     # waitRecv = if you have a Recv function in thread, then you sent packet will received from this thread received function. So creating new socket, sending and receiving data from new socket. So Thread Recv function can't access this data.
     def Send(self, s, waitRecv=False) -> bool:
@@ -360,3 +349,15 @@ class Packet(object):
         except Exception as err:
             self.PrintErr("Print Error: %s    " % err)
             return ""
+class ref():  # We don't have Pointers in Python :(
+    obj = None
+    def __init__(self, obj): self.obj = obj
+    def __get__(self, instance, owner): return self.obj
+    def __set__(self, instance, value): self.obj = value
+    def __eq__(self, other): return other == self.obj
+    def __setattr__(self, key, value): self.__dict__[key] = value
+    def __getattr__(self, item): return self.obj
+    def __str__(self):  # print("Data: %s" % (data_str))
+        return str(self.obj)
+    def __int__(self):  # print("Data: %d" % (data_int))
+        return self.obj
