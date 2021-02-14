@@ -1,52 +1,51 @@
 # -*- coding: utf-8 -*-
-""" Store data as packet. Send, Recv, Encrypt it. 
+""" Store data as packet. Serialize, Deserialize and Send, Recv, Encrypt, it.
 """
 
-version = "1.0.5"
+version = "1.0.6"
 __author__ = "Emre Demircan (emrecpp1@gmail.com)"
-__date__ = "2021-02-09"
+__date__ = "2021-02-14"
 __github__ = "emrecpp"
 
-import sys, os, time
-import socket
+import sys, os, time, json
+import socket, struct
 from functools import singledispatch
-import struct
 from datetime import datetime
 
 class Packet(object):
     storage = bytearray()
 
-    # First 2 bytes : Opcodes [0-255*256]
+    # First 2 bytes : Opcodes [0 - (256*256-1) ]
     INDEX_OF_FLAG = 2  # Flag
     INDEX_OF_COUNT_ELEMENTS = 3 # 4. byte: Count of Total Data types
-    # Todo: 5. byte: empty
-    # Todo: 6. byte: empty
+    # Todo: 5. byte: empty for now
+    # Todo: 6. byte: empty for now
 
-    _rpos, _wpos, encryptEnabled = 6, 6, False
-    PrintErrorLog=False
+    _rpos, _wpos = 6, 6
+    m_Encrypt, m_Compress, PrintErrorLog=False, False, False
 
-    Last_SendTime = "" # if packet will send, will stored this
-    Last_RecvTime = ""
+    Last_SendTime = None # datetime will stored when Packet Sent
+    Last_RecvTime = None # datetime will stored when Packet Received
     class Flags:
         Encrypted=1
-        isLittleEndian=2
+        LittleEndian=2
+        Compressed=4
 
     # Maximum a Variable data Size = "\xFF\xFF\xFF\xFF" (4.294.967.295 bytes (4GB))
-    # Opcode Range: [0-255*256]
     m_littleEndian=False
-    def __init__(self, opcode=0, littleEndian=False, encryptBeforeSend=False, PrintErrorLog=False):
+    def __init__(self, opcode=0, littleEndian=False, Encrypt=False, Compress=False, PrintErrorLog=False):
         super(Packet, self).__init__()
         self._rpos = 6
         self._wpos = 6
-        self.encryptBeforeSend=encryptBeforeSend
+        self.m_Encrypt, self.m_Compress=Encrypt, Compress
         self.PrintErrorLog = PrintErrorLog
         self.overload_append = singledispatch(self.append)
         self.overload_append.register(int, self.append_int)
         self.overload_append.register(str, self.append_str)
         self.overload_append.register(bytearray, self.append_bytearray)
+        self.overload_append.register(list, self.append_list)
         self.storage = bytearray()
-        self.storage.clear()
-        self.storage.extend(struct.pack(">H", opcode))
+        self.storage.extend(struct.pack(">H", opcode)) # Big Endian
         #self.storage.extend(struct.pack("<H", opcode) if littleEndian else struct.pack(">H", opcode))
         self.storage.extend(b'\0\0\0\0')
         self.littleEndian=littleEndian
@@ -59,17 +58,15 @@ class Packet(object):
     def littleEndian(self, value):
         self.m_littleEndian=value
         if value:
-            self.storage[self.INDEX_OF_FLAG] |= self.Flags.isLittleEndian
+            self.storage[self.INDEX_OF_FLAG] |= self.Flags.LittleEndian
         else:
-            self.storage[self.INDEX_OF_FLAG] &= ~self.Flags.isLittleEndian
+            self.storage[self.INDEX_OF_FLAG] &= ~self.Flags.LittleEndian
 
     def append(self, buffer):
-        return TypeError("append Unknown Data Type")
+        return TypeError("Packet: append Unknown Data Type")
 
     def clear(self) -> None:
         if self.size() > 0 and struct.unpack("<H" if self.littleEndian else ">H", self.storage[0:2])[0] != 0:
-            # fmt = '%ds %dx %ds' % (0, 1, len(self.storage)-1)
-            # self.storage = bytearray(struct.unpack(fmt, self.storage)[1])
             self.storage = bytearray(self.storage[0:2])
             self.storage.extend(b'\0\0\0\0')
         else:
@@ -95,6 +92,18 @@ class Packet(object):
             self.storage[i] = (data-encVal) & 0xFF
 
         self.storage[self.INDEX_OF_FLAG] &= ~self.Flags.Encrypted
+    def Compress(self) -> None:
+        if (self.storage[self.INDEX_OF_FLAG] & self.Flags.Compressed) == self.Flags.Compressed:
+            return # if Already Compressed
+        import bz2
+        self.storage[2+4:] = bz2.compress(self.storage[2+4:])
+        self.storage[self.INDEX_OF_FLAG] |= self.Flags.Compressed
+    def DeCompress(self)->None:
+        if (self.storage[self.INDEX_OF_FLAG] & self.Flags.Compressed) != self.Flags.Compressed:
+            return  # if Already DeCompressed / Not Compressed
+        import bz2
+        self.storage[2+4:]=bz2.decompress(self.storage[2+4:])
+        self.storage[self.INDEX_OF_FLAG] &= self.Flags.Compressed
     def append_int(self, buffer) -> None:
         bf = struct.pack("<I", buffer) if self.littleEndian else struct.pack(">I", buffer)
         self.storage.extend(bf)
@@ -114,7 +123,8 @@ class Packet(object):
 
         self.storage.extend(buffer)
         self._wpos += len(buffer)
-
+    def append_list(self, buffer) -> None:
+        self << json.dumps(buffer)
     def __len__(self) -> int:
         return self.size()
 
@@ -123,24 +133,24 @@ class Packet(object):
 
     def GetOpcode(self) -> int:
         return 0 if len(self.storage) < 2 else (struct.unpack("<H",self.storage[0:2])[0] if self.littleEndian else struct.unpack(">H",self.storage[0:2])[0])
-
+    def GetItemsCount(self) -> int: # [ 0 - 255 ]
+        return int(self.storage[self.INDEX_OF_FLAG])
     def __lshift__(self, value):
         self.overload_append(value)
         COUNT_ELEMENTS = self.storage[self.INDEX_OF_COUNT_ELEMENTS]
-        if COUNT_ELEMENTS +1 < 255:
+        if COUNT_ELEMENTS +1 <= 255:
             self.storage[self.INDEX_OF_COUNT_ELEMENTS] += 1
         return self
 
     def __rshift__(self, value):
-        if self.size() > 0 and self._rpos == 0:  # Skip Opcode
-            if self.GetOpcode() != 0: # if opcode is 0 that means we don't have opcode, we have only data
-                self._rpos = 6
         if value.obj == int:
             Sonuc = self.read_int()
         elif value.obj == str:
             Sonuc = self.read_str()
         elif value.obj == bytearray:
             Sonuc = self.read_bytearray()
+        elif value.obj == list:
+            Sonuc = self.read_list()
         else:
             return self
 
@@ -174,7 +184,10 @@ class Packet(object):
         data = bytearray(self.storage[self._rpos:self._rpos+ReadLength])
         self._rpos += ReadLength
         return data
-
+    def read_list(self) -> list:
+        STR = Packet.ref(str)
+        self >> STR
+        return json.loads(str(STR))
     class ref():  # We don't have Pointers in Python :(
         obj = None
         def __init__(self, obj): self.obj = obj
@@ -189,11 +202,10 @@ class Packet(object):
             return self.obj
 
     # waitRecv = if you have a Recv function in thread, then you sent packet will received from this thread received function. So creating new socket, sending and receiving data from new socket. So Thread Recv function can't access this data.
-
     def Send(self, s, waitRecv=False) -> bool:
         """
         :param s: Send socket
-        :param waitRecv: bool, will it wait Recv after Send
+        :param waitRecv: bool
         """
         try:
             if self.size() == 0:
@@ -223,7 +235,8 @@ class Packet(object):
             TargetSocket.send(msg)
             numberOfBytes = self.size()
             totalBytesSent = 0
-            if self.encryptBeforeSend and (self.storage[self.INDEX_OF_FLAG] & self.Flags.Encrypted) ==0: self.Encrypt()
+            if self.m_Compress and (self.storage[self.INDEX_OF_FLAG] & self.Flags.Compressed) == 0: self.Compress()
+            if self.m_Encrypt and (self.storage[self.INDEX_OF_FLAG] & self.Flags.Encrypted) == 0: self.Encrypt()
 
             while totalBytesSent < numberOfBytes:
                 totalBytesSent += TargetSocket.send(self.storage[totalBytesSent:])
@@ -271,10 +284,10 @@ class Packet(object):
                     return False
                 self.storage.extend(ReceivedBytes)
                 totalBytesReceived+=len(ReceivedBytes)
-            
-            self.Last_RecvTime = datetime.now()
-            if (self.storage[self.INDEX_OF_FLAG] & self.Flags.Encrypted) == 1: self.Decrypt()
 
+            self.Last_RecvTime = datetime.now()
+            if (self.storage[self.INDEX_OF_FLAG] & self.Flags.Encrypted) == self.Flags.Encrypted: self.Decrypt()
+            if (self.storage[self.INDEX_OF_FLAG] & self.Flags.Compressed) == self.Flags.Compressed: self.DeCompress()
 
             self._wpos = self.size()
             if self._rpos == 0 and self.size() > 0:
