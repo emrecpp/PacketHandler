@@ -216,7 +216,6 @@ class Packet(object):
                 if self.PrintErrorLog: print("Packet Handler | Connection is already closed!")
                 return False
 
-            msgLength = struct.pack("<I", self.size()) if self.littleEndian else struct.pack(">I", self.size())
 
             TargetSocket = s
 
@@ -234,12 +233,17 @@ class Packet(object):
                     newSocket.connect(s.getpeername())  # Be sure; Server can listen more than 1 socket.
                     TargetSocket = newSocket
 
-            TargetSocket.send(msgLength)
-            numberOfBytes = self.size()
-            totalBytesSent = 0
+
+
             if self.m_Compress and (self.storage[self.INDEX_OF_FLAG] & self.Flags.Compressed) == 0: self.Compress()
             if self.m_Encrypt and (self.storage[self.INDEX_OF_FLAG] & self.Flags.Encrypted) == 0: self.Encrypt()
 
+            numberOfBytes = self.size()
+
+            msgLength = struct.pack("<I", self.size()) if self.littleEndian else struct.pack(">I", self.size())
+            TargetSocket.send(msgLength) # Sending Packet Size before all data
+
+            totalBytesSent = 0
             while totalBytesSent < numberOfBytes:
                 totalBytesSent += TargetSocket.send(self.storage[totalBytesSent:])
             self.Last_SendTime = datetime.now()
@@ -306,7 +310,7 @@ class Packet(object):
         print(ERR, exc_type, fname, exc_tb.tb_lineno)
 
 
-    def Print(self, maxPerLine=16, utf_8=True, Flag=1|2|4) -> str: # 1 Address, 2 Hex Bytes, 4 ASCII
+    def Print(self, Title="", maxPerLine=16, utf_8=True, Flag=1|2|4) -> str: # 1 Address, 2 Hex Bytes, 4 ASCII
         """
         :param maxPerLine: How many bytes will show on per line
         :param utf_8: Decode ASCII to Utf-8
@@ -314,7 +318,10 @@ class Packet(object):
         :return: printing and returning print string
         """
         try:
-            Total = ""
+
+            Total = (  "*** %s *** (%d)\n" % (Title, self.size())  ) if Title != "" else ""
+
+
             dumpstr=""
             for addr in range(0, self.size(),maxPerLine):
                 d = bytes(self.storage[addr:addr+maxPerLine])
