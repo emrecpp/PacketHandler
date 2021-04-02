@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-""" Store data as packet. Serialize, Deserialize and Send, Recv, Encrypt, it.
+""" Store data as packet. Encrypt, Compress, Send-Recv(Serialize, Deserialize) it..
 """
 
-version = "1.0.6"
+version = "1.0.7"
 __author__ = "Emre Demircan (emrecpp1@gmail.com)"
-__date__ = "2021-02-14"
+__date__ = "2021-04-02"
 __github__ = "emrecpp"
 
 import sys, os, time, json
@@ -16,7 +16,7 @@ class Packet(object):
     storage = bytearray()
 
     # First 2 bytes : Opcodes [0 - (256*256-1) ]
-    INDEX_OF_FLAG = 2  # Flag
+    INDEX_OF_FLAG = 2  # 3. byte: Flags (is Packet LittleEndian? Encrypted? Compressed?)
     INDEX_OF_COUNT_ELEMENTS = 3 # 4. byte: Count of Total Data types
     # Todo: 5. byte: empty for now
     # Todo: 6. byte: empty for now
@@ -44,9 +44,9 @@ class Packet(object):
         self.overload_append.register(str, self.append_str)
         self.overload_append.register(bytearray, self.append_bytearray)
         self.overload_append.register(list, self.append_list)
+        self.overload_append.register(bool, self.append_bool)
         self.storage = bytearray()
         self.storage.extend(struct.pack(">H", opcode)) # Big Endian
-        #self.storage.extend(struct.pack("<H", opcode) if littleEndian else struct.pack(">H", opcode))
         self.storage.extend(b'\0\0\0\0')
         self.littleEndian=littleEndian
 
@@ -66,8 +66,11 @@ class Packet(object):
         return TypeError("Packet: append Unknown Data Type")
 
     def clear(self) -> None:
-        if self.size() > 0 and struct.unpack("<H" if self.littleEndian else ">H", self.storage[0:2])[0] != 0:
-            self.storage = bytearray(self.storage[0:2])
+        if self.size() > 0 and self.GetOpcode() != 0:
+            Opcode = self.GetOpcode()
+            self.storage.clear()
+            del self.storage
+            self.storage = bytearray(struct.pack(">H", Opcode))
             self.storage.extend(b'\0\0\0\0')
         else:
             self.storage.clear()
@@ -125,6 +128,10 @@ class Packet(object):
         self._wpos += len(buffer)
     def append_list(self, buffer) -> None:
         self << json.dumps(buffer)
+    def append_bool(self, buffer) -> None:
+        self.storage.extend(b'\x01' if buffer else b'\x00')
+        self._wpos+=1
+
     def __len__(self) -> int:
         return self.size()
 
@@ -151,6 +158,8 @@ class Packet(object):
             Sonuc = self.read_bytearray()
         elif value.obj == list:
             Sonuc = self.read_list()
+        elif value.obj == bool:
+            Sonuc = self.read_bool()
         else:
             return self
 
@@ -188,6 +197,10 @@ class Packet(object):
         STR = ref(str)
         self >> STR
         return json.loads(str(STR))
+    def read_bool(self)->bool:
+        bool = True if self.storage[self._rpos] == 1 else False
+        self._rpos+=1
+        return bool
 
 
     # waitRecv = if you have a Recv function in thread, then you sent packet will received from this thread received function. So creating new socket, sending and receiving data from new socket. So Thread Recv function can't access this data.
@@ -203,7 +216,7 @@ class Packet(object):
                 if self.PrintErrorLog: print("Packet Handler | Connection is already closed!")
                 return False
 
-            msg = struct.pack("<I", self.size()) if self.littleEndian else struct.pack(">I", self.size())
+            msgLength = struct.pack("<I", self.size()) if self.littleEndian else struct.pack(">I", self.size())
 
             TargetSocket = s
 
@@ -221,7 +234,7 @@ class Packet(object):
                     newSocket.connect(s.getpeername())  # Be sure; Server can listen more than 1 socket.
                     TargetSocket = newSocket
 
-            TargetSocket.send(msg)
+            TargetSocket.send(msgLength)
             numberOfBytes = self.size()
             totalBytesSent = 0
             if self.m_Compress and (self.storage[self.INDEX_OF_FLAG] & self.Flags.Compressed) == 0: self.Compress()
