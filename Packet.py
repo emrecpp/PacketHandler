@@ -2,10 +2,13 @@
 """ Store data as packet. Encrypt, Compress, Send-Recv(Serialize, Deserialize) it..
 """
 
-version = "1.0.7"
+# https://www.github.com/emrecpp
+
+version = "1.0.7.1"
 __author__ = "Emre Demircan (emrecpp1@gmail.com)"
-__date__ = "2021-04-02"
+__date__ = "2021-04-11"
 __github__ = "emrecpp"
+
 
 import sys, os, time, json
 import socket, struct
@@ -141,7 +144,7 @@ class Packet(object):
     def GetOpcode(self) -> int:
         return 0 if len(self.storage) < 2 else (struct.unpack("<H",self.storage[0:2])[0] if self.littleEndian else struct.unpack(">H",self.storage[0:2])[0])
     def GetItemsCount(self) -> int: # [ 0 - 255 ]
-        return int(self.storage[self.INDEX_OF_FLAG])
+        return int(self.storage[self.INDEX_OF_COUNT_ELEMENTS]) if self.INDEX_OF_COUNT_ELEMENTS < self.size() else 0
     def __lshift__(self, value):
         self.overload_append(value)
         COUNT_ELEMENTS = self.storage[self.INDEX_OF_COUNT_ELEMENTS]
