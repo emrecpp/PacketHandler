@@ -29,7 +29,7 @@ class Packet(object):
     storage = bytearray()
 
     # First 2 bytes : Opcodes [ 0 - (256*256-1) ]
-    INDEX_OF_FLAG = 2  # 3. byte: Flags (is Packet LittleEndian? Encrypted? Compressed?)
+    INDEX_OF_FLAG           = 2  # 3. byte: Flags (is Packet LittleEndian? Encrypted? Compressed?)
     INDEX_OF_COUNT_ELEMENTS = 3  # 4. byte: Count of Total Data types
     # Todo: 5. byte: empty for now
     # Todo: 6. byte: empty for now
@@ -41,9 +41,9 @@ class Packet(object):
     Last_RecvTime = None  # datetime will stored when Packet Received
 
     class Flags(IntEnum):
-        Encrypted = 1
+        Encrypted    = 1
         LittleEndian = 2
-        Compressed = 4
+        Compressed   = 4
 
     # Maximum a Variable data Size = "\xFF\xFF\xFF\xFF" (4.294.967.295 bytes (4GB))
     def __init__(self, Opcode=0, LittleEndian=False, Encrypt=False, Compress=False, PrintErrorLog=False):
