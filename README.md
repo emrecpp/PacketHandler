@@ -1,13 +1,24 @@
 # Python Packet Handler
-Store data as packet. Send, Recv, Encrypt it.
+Store data as packet. Send, Recv, Encrypt and Compress it.
 
-For C#: https://github.com/emrecpp/DataPacket-CSharp
+You will be able to manage **socket communication** easily and comprehensibly using this Python package.
+With version 1.0.9 or later, you can use the "**addListener**" function to direct incoming opcodes to the desired function upon receipt.
 
-For C++: https://github.com/emrecpp/DataPacket-CPP
+Please refer to the [**Example Usage**](ExampleUsage.py) file for details and run it for demonstration.
 
-Take a Look! [Test](https://github.com/emrecpp/PacketHandler/blob/main/Test.py)
+**These packages are also available for C# and C++ programming languages:**
 
-# Example Usage
+C#: https://github.com/emrecpp/DataPacket-CSharp
+
+C++: https://github.com/emrecpp/DataPacket-CPP
+## Installation
+You can install **PacketHandler** using pip:
+
+```
+pip install PacketHandler
+```
+
+# Usage ([**Detailed Usage**](ExampleUsage.py))
 
 ```
 from Packet import Packet, ref
@@ -37,7 +48,7 @@ while True:
             UserName, Password, RememberMe, Data, Fruits = ref(str), ref(str), ref(bool), ref(bytearray), ref(list)
             PacketListen >> UserName >> Password >> RememberMe >> Data >> Fruits
             UserName, Password, RememberMe, Data, Fruits = str(UserName), str(Password), RememberMe.obj, bytearray(Data.obj), ", ".join(Fruits.obj)  # We have to cast ref object to (int, str, bool, bytearray ...)
-            # Note: Can't use bool(RememberMe), this returns True everytime!!!
+            # Note: Can't use bool(RememberMe), this returns True everytime. Use .obj always !!!
 
             print(f"Username: {UserName}\nPassword: {Password}\nRememberMe: {'Yes' if RememberMe else 'No'}\nData: {str(Data)}\nFruits: {Fruits}")
     else:
@@ -56,9 +67,9 @@ Fruits: Apple, Banana, Orange
 
 
 *** RECEIVED PACKET (YOUR TITLE)! *** (67)
-00000000: 00 64 04 06 00 00 00 00 00 04 45 6D 72 65 00 00   .d........Emre..
-00000010: 00 03 31 32 33 01 00 00 00 08 07 10 42 59 54 45   ..123.......BYTE
-00000020: 53 FF 00 00 00 1D 5B 22 41 70 70 6C 65 22 2C 20   S.ÿ.........[.".A.p.p.l.e.".,..
+00000000: 00 64 02 06 00 00 04 00 00 00 45 6D 72 65 03 00   .d........Emre..
+00000010: 00 00 31 32 33 01 08 00 00 00 07 10 42 59 54 45   ..123.......BYTE
+00000020: 53 FF 1D 00 00 00 5B 22 41 70 70 6C 65 22 2C 20   S.ÿ.........[.".A.p.p.l.e.".,..
 00000030: 22 42 61 6E 61 6E 61 22 2C 20 22 4F 72 61 6E 67   "Banana",."Orang
 00000040: 65 22 5D                                           e"]
 
