@@ -49,7 +49,7 @@ def Server():
             else: # Got new data from already connected socket
                 PacketListen = Packet(PrintErrorLog=True, Compress=True, Encrypt=True, LittleEndian=True)
                 if PacketListen.Recv(s): # Will be automatically Decrypted / UnCompressed if Encrypted or Compressed
-                    # PacketListen.Print("RECEIVED PACKET (YOUR TITLE)!")
+                    PacketListen.Print("RECEIVED PACKET (YOUR TITLE)!")
                     if PacketListen.GetOpcode() == opcodes.LOGIN:
 
                         UserName, Password, RememberMe, Data, Fruits = ref(str), ref(str), ref(bool), ref(bytearray), ref(list)

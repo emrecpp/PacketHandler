@@ -13,19 +13,19 @@ import sys, time, json, socket, struct
 from functools import singledispatch
 from datetime import datetime
 from enum import IntEnum
-import core.helpers as helper
-from core.DataEnums import OnSendRecv, EListener
+try:
+    import core.helpers as helper
+    from core.DataEnums import EListener
+except ImportError:
+    import PacketHandler.core.helpers as helper
+    from PacketHandler.core.DataEnums import EListener
+
 
 class PacketManager(object):
-    #_m_send, _m_recv = [], []
     _m_recv:list[EListener] = []
     @staticmethod
     def addListener(listener:EListener):
         PacketManager._m_recv.append(listener)
-        '''if onType == OnSendRecv.SEND:
-            PacketManager._m_send.append(onType)
-        elif onType == OnSendRecv.RECV:
-            PacketManager._m_recv.append(onType)'''
 
     @staticmethod
     def getListenerByOpcode(opcode:int):
@@ -170,8 +170,6 @@ class Packet(object):
 
     def append_bytes(self, buffer:bytes) -> None:
         self << bytearray(buffer)
-
-
 
 
     def __len__(self) -> int:
