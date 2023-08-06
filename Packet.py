@@ -1,41 +1,58 @@
 # -*- coding: utf-8 -*-
 """ Store data as packet. Encrypt, Compress, Send-Recv(Serialize, Deserialize) it.."""
-''' | Notes |
-  
-    1) If LittleEndian is enabled, this variable must have the same value when sending and recving packets.
-         Example:
-             On Send:
-                 PktForSend = Packet(Opcode=10, LittleEndian=True)
-                 PktForSend.Send(sock)
-             On Recv:
-                 PktForRecv = Packet(LittleEndian=True) # if don't set Little Endian to true, defaultly false this will cause error
-                 PktForRecv.Recv()                
-'''
+
 
 # https://www.github.com/emrecpp
 
-version = "1.0.8"
+version = "1.0.9"
 __author__ = "Emre Demircan (emrecpp1@gmail.com)"
-__date__ = "2022-01-04"
+__date__ = "2023-08-06"
 __github__ = "emrecpp"
 
 import sys, time, json, socket, struct
 from functools import singledispatch
 from datetime import datetime
 from enum import IntEnum
+import core.helpers as helper
+from core.DataEnums import OnSendRecv, EListener
 
+class PacketManager(object):
+    #_m_send, _m_recv = [], []
+    _m_recv:list[EListener] = []
+    @staticmethod
+    def addListener(listener:EListener):
+        PacketManager._m_recv.append(listener)
+        '''if onType == OnSendRecv.SEND:
+            PacketManager._m_send.append(onType)
+        elif onType == OnSendRecv.RECV:
+            PacketManager._m_recv.append(onType)'''
+
+    @staticmethod
+    def getListenerByOpcode(opcode:int):
+        for listener in PacketManager._m_recv:
+            if listener.opcode == opcode:
+                return listener
+        return None
+    @staticmethod
+    def removeListener(listener:EListener):
+        if not listener: return
+        if listener in PacketManager._m_recv:
+            PacketManager._m_recv.remove(listener)
+    @staticmethod
+    def removeListenerByOpcode(opcode:int):
+        PacketManager.removeListener(PacketManager.getListenerByOpcode(opcode=opcode))
 
 class Packet(object):
     storage = bytearray()
 
     # First 2 bytes : Opcodes [ 0 - (256*256-1) ]
-    INDEX_OF_FLAG           = 2  # 3. byte: Flags (is Packet LittleEndian? Encrypted? Compressed?)
-    INDEX_OF_COUNT_ELEMENTS = 3  # 4. byte: Count of Total Data types
+    __INDEX_OF_FLAG           = 2  # 3. byte: Flags (is Packet LittleEndian? Encrypted? Compressed?)
+    __INDEX_OF_COUNT_ELEMENTS = 3  # 4. byte: Count of Total Data types
     # Todo: 5. byte: empty for now
     # Todo: 6. byte: empty for now
 
-    _rpos, _wpos = 6, 6
-    _bLittleEndian, _bEncrypt, _bCompress, _bPrintErrorLog = False, False, False, False
+    _rpos = _wpos = 6
+    _m_Encrypt = _m_Compress = _m_PrintErrorLog = False
 
     Last_SendTime = None  # datetime will stored when Packet Sent
     Last_RecvTime = None  # datetime will stored when Packet Received
@@ -46,104 +63,116 @@ class Packet(object):
         Compressed   = 4
 
     # Maximum a Variable data Size = "\xFF\xFF\xFF\xFF" (4.294.967.295 bytes (4GB))
-    def __init__(self, Opcode=0, LittleEndian=False, Encrypt=False, Compress=False, PrintErrorLog=False):
-        super(Packet, self).__init__()
+    def __init__(self, Opcode:int=0, LittleEndian:bool=False, Encrypt:bool=False, Compress:bool=False, PrintErrorLog:bool=False):
+        super().__init__()
         self.storage = bytearray()
-        self.storage.extend(struct.pack(">H", Opcode))  # Hard-coded Big Endian
-        self.storage.extend(b'\0\0\0\0')
-        self._rpos, self._wpos, self.littleEndian = 6, 6, LittleEndian
-        self._bEncrypt, self._bCompress, self._bPrintErrorLog = Encrypt, Compress, PrintErrorLog
+        self._initNew(newOpcode=Opcode) # init first 6 bytes (
+        self._rpos = self._wpos = 6
+        self._m_Encrypt, self._m_Compress, self._m_PrintErrorLog = Encrypt, Compress, PrintErrorLog
+        self.littleEndian = LittleEndian
         self.overload_append = singledispatch(self.append)
         self.overload_append.register(int, self.append_int)
         self.overload_append.register(str, self.append_str)
         self.overload_append.register(bytearray, self.append_bytearray)
         self.overload_append.register(list, self.append_list)
+        self.overload_append.register(dict, self.append_dict)
         self.overload_append.register(bool, self.append_bool)
+        self.overload_append.register(bytes, self.append_bytes)
 
     @property
-    def littleEndian(self):
-        return self._bLittleEndian
+    def littleEndian(self) -> bool:
+        return self.storage[self.__INDEX_OF_FLAG] & self.Flags.LittleEndian
 
     @littleEndian.setter
     def littleEndian(self, value):
-        self._bLittleEndian = value
         if value:
-            self.storage[self.INDEX_OF_FLAG] |= self.Flags.LittleEndian
+            self.storage[self.__INDEX_OF_FLAG] |= self.Flags.LittleEndian
         else:
-            self.storage[self.INDEX_OF_FLAG] &= ~self.Flags.LittleEndian
+            self.storage[self.__INDEX_OF_FLAG] &= ~self.Flags.LittleEndian
 
     def append(self, buffer):
-        return TypeError("Packet: append Unknown Data Type")
+        raise TypeError("Append Unknown Data Type")
+
+    def _initNew(self, newOpcode=None) -> None:
+        result_opcode = 0
+        if newOpcode:
+            result_opcode = newOpcode
+        elif self.size() > 0 and self.GetOpcode() != 0:
+            result_opcode = self.GetOpcode()
+        self.storage.clear()
+        del self.storage
+        self.storage = bytearray(struct.pack(">H", result_opcode))  # Hard-coded Big Endian
+
+        self.storage.extend(b'\0\0\0\0')
+        self._rpos = self._wpos  = 6
 
     def clear(self) -> None:
-        if self.size() > 0 and self.GetOpcode() != 0:
-            Opcode = self.GetOpcode()
-            self.storage.clear()
-            del self.storage
-            self.storage = bytearray(struct.pack(">H", Opcode))  # Hard-coded Big Endian
-            self.storage.extend(b'\0\0\0\0')
-        else:
-            self.storage.clear()
-            self.storage.extend(b'\0\0\0\0\0\0')
-        self._rpos = 6
-        self._wpos = 6
+        self._initNew()
 
-    def Encrypt(self) -> None:
+    def Encrypt(self, seed:int = 0x123) -> None:
         for i in range(2 + 4, self.size()):  # Skip opcode (first 2 bytes) and reserved 4 bytes
             data = self.storage[i]
-            encVal = 0x123 + i * 4
+            encVal = seed + i * 4
             encVal ^= 0xFF
 
             self.storage[i] = (data + encVal) & 0xFF
-        self.storage[self.INDEX_OF_FLAG] |= self.Flags.Encrypted
+        self.storage[self.__INDEX_OF_FLAG] |= self.Flags.Encrypted
 
-    def Decrypt(self) -> None:
+    def Decrypt(self, seed:int = 0x123) -> None:
         for i in range(2 + 4, self.size()):  # Skip opcode (first 2 bytes) and reserved 4 bytes
             data = self.storage[i]
-            encVal = 0x123 + i * 4
+            encVal = seed + i * 4
             encVal ^= 0xFF
 
             self.storage[i] = (data - encVal) & 0xFF
 
-        self.storage[self.INDEX_OF_FLAG] &= ~self.Flags.Encrypted
+        self.storage[self.__INDEX_OF_FLAG] &= ~self.Flags.Encrypted
 
     def Compress(self) -> None:
-        if (self.storage[self.INDEX_OF_FLAG] & self.Flags.Compressed) == self.Flags.Compressed:
+        if (self.storage[self.__INDEX_OF_FLAG] & self.Flags.Compressed) == self.Flags.Compressed:
             return  # if Already Compressed
         import bz2
         self.storage[2 + 4:] = bz2.compress(self.storage[2 + 4:])
-        self.storage[self.INDEX_OF_FLAG] |= self.Flags.Compressed
+        self.storage[self.__INDEX_OF_FLAG] |= self.Flags.Compressed
 
     def DeCompress(self) -> None:
-        if (self.storage[self.INDEX_OF_FLAG] & self.Flags.Compressed) != self.Flags.Compressed:
+        if (self.storage[self.__INDEX_OF_FLAG] & self.Flags.Compressed) != self.Flags.Compressed:
             return  # if Already DeCompressed / Not Compressed
         import bz2
         self.storage[2 + 4:] = bz2.decompress(self.storage[2 + 4:])
-        self.storage[self.INDEX_OF_FLAG] &= ~self.Flags.Compressed
+        self.storage[self.__INDEX_OF_FLAG] &= ~self.Flags.Compressed
 
-    def append_int(self, buffer) -> None:
+    def append_int(self, buffer:int) -> None:
         bf = struct.pack("<I" if self.littleEndian else ">I", buffer)
         self.storage.extend(bf)
         self._wpos += len(bf)
 
-    def append_str(self, buffer) -> None:
+    def append_str(self, buffer:str) -> None:
         bytesBuffer = bytes(buffer, "utf-8")
         bf = struct.pack("%ds" % (len(bytesBuffer)), bytesBuffer)
         self.storage.extend(struct.pack("<I" if self.littleEndian else ">I", len(bf)))
         self.storage.extend(bf)
         self._wpos += len(bf)
 
-    def append_bytearray(self, buffer) -> None:
+    def append_bytearray(self, buffer:bytearray) -> None:
         self.storage.extend(struct.pack("<I" if self.littleEndian else ">I", len(buffer)))
         self.storage.extend(buffer)
         self._wpos += len(buffer)
 
-    def append_list(self, buffer) -> None:
+    def append_list(self, buffer:list) -> None:
         self << json.dumps(buffer)
+    def append_dict(self, buffer:dict):
+        self << json.dumps(buffer, ensure_ascii=False, indent=None)
 
-    def append_bool(self, buffer) -> None:
+    def append_bool(self, buffer:bool) -> None:
         self.storage.extend(b'\x01' if buffer else b'\x00')
         self._wpos += 1
+
+    def append_bytes(self, buffer:bytes) -> None:
+        self << bytearray(buffer)
+
+
+
 
     def __len__(self) -> int:
         return self.size()
@@ -152,17 +181,16 @@ class Packet(object):
         return len(self.storage)
 
     def GetOpcode(self) -> int:
-        return 0 if len(self.storage) < 2 else (
-        struct.unpack("<H" if self.littleEndian else ">H", self.storage[0:2])[0])
+        return 0 if len(self.storage) < 2 else (struct.unpack(">H", self.storage[0:2])[0]) # hard coded big endian
 
     def GetItemsCount(self) -> int:  # [ 0 - 255 ]
-        return int(self.storage[self.INDEX_OF_COUNT_ELEMENTS]) if self.INDEX_OF_COUNT_ELEMENTS < self.size() else 0
+        return int(self.storage[self.__INDEX_OF_COUNT_ELEMENTS]) if self.__INDEX_OF_COUNT_ELEMENTS < self.size() else 0
 
     def __lshift__(self, value):
         self.overload_append(value)
-        COUNT_ELEMENTS = self.storage[self.INDEX_OF_COUNT_ELEMENTS]
+        COUNT_ELEMENTS = self.storage[self.__INDEX_OF_COUNT_ELEMENTS]
         if COUNT_ELEMENTS + 1 <= 255:
-            self.storage[self.INDEX_OF_COUNT_ELEMENTS] += 1
+            self.storage[self.__INDEX_OF_COUNT_ELEMENTS] += 1
         return self
 
     def __rshift__(self, value):
@@ -172,12 +200,16 @@ class Packet(object):
             Sonuc = self.read_str()
         elif value.obj == bytearray:
             Sonuc = self.read_bytearray()
+        elif value.obj == bytes:
+            Sonuc = self.read_bytes()
         elif value.obj == list:
             Sonuc = self.read_list()
+        elif value.obj == dict:
+            Sonuc = self.read_dict()
         elif value.obj == bool:
             Sonuc = self.read_bool()
         else:
-            return self
+            raise TypeError("Read Unknown Data Type")
 
         value.obj = Sonuc
         return self
@@ -209,8 +241,16 @@ class Packet(object):
         data = bytearray(self.storage[self._rpos:self._rpos + ReadLength])
         self._rpos += ReadLength
         return data
+    def read_bytes(self) -> bytes:
+        BYTES = ref(bytearray)
+        self >> BYTES
+        return bytes(BYTES.obj)
 
     def read_list(self) -> list:
+        STR = ref(str)
+        self >> STR
+        return json.loads(str(STR))
+    def read_dict(self) -> list:
         STR = ref(str)
         self >> STR
         return json.loads(str(STR))
@@ -230,7 +270,7 @@ class Packet(object):
             if self.size() == 0:
                 return False
             if hasattr(s, "_closed") and s._closed:
-                if self._bPrintErrorLog: print("Packet Handler | Connection is already closed!")
+                if self._m_PrintErrorLog: print("Packet Handler | Connection is already closed!")
                 return False
 
             TargetSocket = s
@@ -249,12 +289,12 @@ class Packet(object):
                     newSocket.connect(s.getpeername())  # Be sure; Server can listen more than 1 socket.
                     TargetSocket = newSocket
 
-            if self._bCompress and (self.storage[self.INDEX_OF_FLAG] & self.Flags.Compressed) == 0: self.Compress()
-            if self._bEncrypt and (self.storage[self.INDEX_OF_FLAG] & self.Flags.Encrypted) == 0: self.Encrypt()
+            if self._m_Compress and (self.storage[self.__INDEX_OF_FLAG] & self.Flags.Compressed) == 0: self.Compress()
+            if self._m_Encrypt and (self.storage[self.__INDEX_OF_FLAG] & self.Flags.Encrypted) == 0: self.Encrypt()
 
             numberOfBytes = self.size()
 
-            msgLength = struct.pack("<I" if self.littleEndian else ">I", self.size())
+            msgLength = struct.pack(">I", self.size()) # Hard-coded Big Endian
             TargetSocket.send(msgLength)  # Sending Packet Size before all data
 
             totalBytesSent = 0
@@ -273,10 +313,10 @@ class Packet(object):
         except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
             return False
         except OSError:
-            if self._bPrintErrorLog: print("Packet Handler | Send Failed probably Connection Closed.")
+            if self._m_PrintErrorLog: print("Packet Handler | Send Failed probably Connection Closed.")
             return False
         except Exception as ERR:
-            if self._bPrintErrorLog: self.PrintErr("Packet Send Err: %s    " % str(ERR))
+            if self._m_PrintErrorLog: helper.PrintErr("Packet Send Err: %s    " % str(ERR))
             return False
 
     def Recv(self, s, clear=True) -> bool:
@@ -290,7 +330,7 @@ class Packet(object):
             packetSize = s.recv(4)
             if not packetSize:  # Connection Closed
                 return False
-            packetSize = struct.unpack("<I" if self.littleEndian else ">I", packetSize)[0]
+            packetSize = struct.unpack(">I", packetSize)[0] # Hard-coded Big Endian
 
             self.storage.clear()
             totalBytesReceived = 0
@@ -299,28 +339,34 @@ class Packet(object):
                 ReceivedBytes = s.recv(packetSize - totalBytesReceived)
 
                 if not ReceivedBytes:
-                    if self._bPrintErrorLog: print("Packet Handler | Connection closed while receiving")
+                    if self._m_PrintErrorLog: print("Packet Handler | Connection closed while receiving")
                     return False
                 self.storage.extend(ReceivedBytes)
                 totalBytesReceived += len(ReceivedBytes)
 
             self.Last_RecvTime = datetime.now()
-            if (self.storage[self.INDEX_OF_FLAG] & self.Flags.Encrypted) == self.Flags.Encrypted: self.Decrypt()
-            if (self.storage[self.INDEX_OF_FLAG] & self.Flags.Compressed) == self.Flags.Compressed: self.DeCompress()
+            if (self.storage[self.__INDEX_OF_FLAG] & self.Flags.Encrypted) == self.Flags.Encrypted: self.Decrypt()
+            if (self.storage[self.__INDEX_OF_FLAG] & self.Flags.Compressed) == self.Flags.Compressed: self.DeCompress()
             self._wpos = self.size()
             if self._rpos == 0 and self.size() > 0:
                 self._rpos = 6  # Skip Opcode
+            listener_if_exists = PacketManager.getListenerByOpcode(self.GetOpcode())
+            if listener_if_exists:
+                args = listener_if_exists.callback_arguments if listener_if_exists.callback_arguments else ()
+
+                if listener_if_exists.first_argument_packet:
+                    args = (self,) + args
+                    helper.CallFunc((listener_if_exists.callback, *args))
+                else:
+                    helper.CallFunc((listener_if_exists.callback, args))
             return True
         except (ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError):
             return False
         except Exception as ERR:
-            if self._bPrintErrorLog: self.PrintErr("Packet Recv Err: %s    " % str(ERR))
+            if self._m_PrintErrorLog: helper.PrintErr("Packet Recv Err: %s    " % str(ERR))
             return False
 
-    def PrintErr(self, ERR) -> None:
-        exc_type, exc_obj, exc_tb = sys.exc_info();
-        fname = exc_tb.tb_frame.f_code.co_filename
-        print(ERR, exc_type, fname, exc_tb.tb_lineno)
+    
 
     def Print(self, Title="", maxPerLine=16, utf_8=True, Flag=1 | 2 | 4) -> str:  # 1 Address, 2 Hex Bytes, 4 ASCII
         """
@@ -379,7 +425,7 @@ class Packet(object):
             print(Total)
             return Total
         except Exception as err:
-            self.PrintErr("Print Error: %s    " % err)
+            helper.PrintErr("Print Error: %s    " % err)
             return ""
 
 
@@ -395,3 +441,7 @@ class ref():  # We don't have Pointers in Python :(
         return str(self.obj)
     def __int__(self):  # print("Data: %d" % (data_int))
         return self.obj
+
+
+class EListener(EListener): # for access only packet.py file
+    pass
